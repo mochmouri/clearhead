@@ -1,0 +1,33 @@
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xcscheme
+DerivedData/
+*.xccheckout
+*.moved-aside
+*.pbxuser
+*.perspectivev3
+!default.pbxuser
+!default.perspectivev3
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Build output
+build/
+*.ipa
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+
+# CocoaPods
+Pods/
+
+# Secrets — never commit API keys
+*.env
+secrets.plist
