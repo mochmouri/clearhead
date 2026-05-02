@@ -26,10 +26,17 @@ final class GeminiService {
 
     private let endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
-    func analyse(text: String) async throws -> FallacyAnalysis {
-        guard let apiKey = UserDefaults(suiteName: "group.com.clearhead.shared")?.string(forKey: "apiKey"),
+    func analyse(text: String, source: String = "shared") async throws -> FallacyAnalysis {
+        guard let apiKey = UserDefaults.standard.string(forKey: "apiKey"),
               !apiKey.isEmpty else {
             throw GeminiError.noAPIKey
+        }
+
+        let suggestionInstruction: String
+        if source == "manual" {
+            suggestionInstruction = "\"suggestion\": \"<one paragraph on how to fix or strengthen the argument presented in the text>\""
+        } else {
+            suggestionInstruction = "\"suggestion\": \"<one paragraph suggesting a thoughtful direction for a reply to this text>\""
         }
 
         let prompt = """
@@ -43,9 +50,11 @@ final class GeminiService {
             {
               "name": "<fallacy name>",
               "explanation": "<one sentence in plain English, no jargon>",
-              "severity": "<high|medium|low>"
+              "severity": "<high|medium|low>",
+              "quote": "<verbatim short excerpt from the text that best illustrates this fallacy, or null if no specific quote applies>"
             }
-          ]
+          ],
+          \(suggestionInstruction)
         }
 
         If no fallacies are present, return an empty array for "fallacies" and a score of 100.
@@ -70,7 +79,7 @@ final class GeminiService {
             throw GeminiError.invalidResponse
         }
 
-        var request = URLRequest(url: url, timeoutInterval: 10)
+        var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)

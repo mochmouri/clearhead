@@ -214,15 +214,22 @@ final class ShareViewController: UIViewController {
         let preview = String(text.prefix(100))
         previewLabel.text = text.count > 100 ? preview + "…" : preview
 
-        guard let apiKey = UserDefaults(suiteName: "group.com.clearhead.shared")?.string(forKey: "apiKey"),
-              !apiKey.isEmpty else {
-            showError("No API key set. Open the ClearHead app to add your Gemini API key.")
+        let savedKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
+        guard !savedKey.isEmpty else {
+            showAPIKeyEntry()
             return
         }
 
+        runAnalysis(text: text)
+    }
+
+    private func runAnalysis(text: String) {
+        loadingView.isHidden = false
+        resultsScrollView.isHidden = true
+
         Task {
             do {
-                let result = try await GeminiService.shared.analyse(text: text)
+                let result = try await GeminiService.shared.analyse(text: text, source: "shared")
                 await MainActor.run {
                     self.showResults(result)
                     self.saveToHistory(text: text, analysis: result)
@@ -233,6 +240,66 @@ final class ShareViewController: UIViewController {
                 }
             }
         }
+    }
+
+    // MARK: - API key entry (shown when no key is stored in the extension)
+
+    private var apiKeyField: UITextField?
+
+    private func showAPIKeyEntry() {
+        loadingView.isHidden = true
+        resultsScrollView.isHidden = false
+        resultsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        let container = UIView()
+
+        let label = UILabel()
+        label.text = "Enter your Gemini API key to analyse text."
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let field = UITextField()
+        field.placeholder = "Paste API key here"
+        field.borderStyle = .roundedRect
+        field.isSecureTextEntry = true
+        field.autocorrectionType = .no
+        field.autocapitalizationType = .none
+        field.translatesAutoresizingMaskIntoConstraints = false
+        self.apiKeyField = field
+
+        let saveButton = UIButton(type: .system)
+        saveButton.setTitle("Save & Analyse", for: .normal)
+        saveButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+        saveButton.addTarget(self, action: #selector(saveKeyAndAnalyse), for: .touchUpInside)
+        saveButton.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(label)
+        container.addSubview(field)
+        container.addSubview(saveButton)
+
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            field.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 16),
+            field.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            field.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            field.heightAnchor.constraint(equalToConstant: 44),
+            saveButton.topAnchor.constraint(equalTo: field.bottomAnchor, constant: 12),
+            saveButton.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            saveButton.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
+        ])
+
+        resultsStack.addArrangedSubview(container)
+    }
+
+    @objc private func saveKeyAndAnalyse() {
+        guard let key = apiKeyField?.text, !key.isEmpty else { return }
+        UserDefaults.standard.set(key, forKey: "apiKey")
+        runAnalysis(text: sharedText)
     }
 
     // MARK: - Results rendering
@@ -254,6 +321,11 @@ final class ShareViewController: UIViewController {
                     resultsStack.addArrangedSubview(makeDivider())
                 }
             }
+        }
+
+        if let suggestion = analysis.suggestion, !suggestion.isEmpty {
+            resultsStack.addArrangedSubview(makeDivider())
+            resultsStack.addArrangedSubview(makeSuggestionView(suggestion))
         }
     }
 
@@ -320,23 +392,77 @@ final class ShareViewController: UIViewController {
         explanationLabel.textColor = .secondaryLabel
         explanationLabel.numberOfLines = 0
 
-        let textStack = UIStackView(arrangedSubviews: [nameLabel, explanationLabel])
-        textStack.axis = .vertical
-        textStack.spacing = 4
-        textStack.translatesAutoresizingMaskIntoConstraints = false
-
         let pill = makeSeverityPill(fallacy.severity)
 
-        container.addSubview(textStack)
-        container.addSubview(pill)
+        let headerRow = UIStackView(arrangedSubviews: [nameLabel, UIView(), pill])
+        headerRow.axis = .horizontal
+        headerRow.alignment = .center
+        headerRow.spacing = 8
 
+        var subviews: [UIView] = [headerRow, explanationLabel]
+
+        if let quote = fallacy.quote, !quote.isEmpty {
+            let quoteBox = UIView()
+            quoteBox.backgroundColor = .tertiarySystemBackground
+            quoteBox.layer.cornerRadius = 6
+
+            let quoteLabel = UILabel()
+            quoteLabel.text = "\u{201C}\(quote)\u{201D}"
+            quoteLabel.font = .italicSystemFont(ofSize: 12)
+            quoteLabel.textColor = .secondaryLabel
+            quoteLabel.numberOfLines = 0
+            quoteLabel.translatesAutoresizingMaskIntoConstraints = false
+
+            quoteBox.addSubview(quoteLabel)
+            NSLayoutConstraint.activate([
+                quoteLabel.topAnchor.constraint(equalTo: quoteBox.topAnchor, constant: 6),
+                quoteLabel.bottomAnchor.constraint(equalTo: quoteBox.bottomAnchor, constant: -6),
+                quoteLabel.leadingAnchor.constraint(equalTo: quoteBox.leadingAnchor, constant: 8),
+                quoteLabel.trailingAnchor.constraint(equalTo: quoteBox.trailingAnchor, constant: -8),
+            ])
+            subviews.append(quoteBox)
+        }
+
+        let textStack = UIStackView(arrangedSubviews: subviews)
+        textStack.axis = .vertical
+        textStack.spacing = 6
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(textStack)
         NSLayoutConstraint.activate([
             textStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
-            textStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
-            textStack.trailingAnchor.constraint(lessThanOrEqualTo: pill.leadingAnchor, constant: -12),
             textStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
-            pill.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            pill.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            textStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            textStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+        ])
+        return container
+    }
+
+    private func makeSuggestionView(_ suggestion: String) -> UIView {
+        let container = UIView()
+
+        let titleLabel = UILabel()
+        titleLabel.text = "Reply Direction"
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .label
+
+        let bodyLabel = UILabel()
+        bodyLabel.text = suggestion
+        bodyLabel.font = .systemFont(ofSize: 13)
+        bodyLabel.textColor = .secondaryLabel
+        bodyLabel.numberOfLines = 0
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, bodyLabel])
+        stack.axis = .vertical
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
         ])
         return container
     }
@@ -434,11 +560,11 @@ final class ShareViewController: UIViewController {
     // MARK: - History persistence
 
     private func saveToHistory(text: String, analysis: FallacyAnalysis) {
-        let record = AnalysisRecord(id: UUID(), date: Date(), text: text, analysis: analysis)
-        let defaults = UserDefaults(suiteName: "group.com.clearhead.shared")
+        let record = AnalysisRecord(id: UUID(), date: Date(), text: text, analysis: analysis, source: "shared")
+        let defaults = UserDefaults.standard
 
         var records: [AnalysisRecord] = []
-        if let data = defaults?.data(forKey: "analysisHistory"),
+        if let data = defaults.data(forKey: "analysisHistory"),
            let existing = try? JSONDecoder().decode([AnalysisRecord].self, from: data) {
             records = existing
         }
@@ -446,7 +572,7 @@ final class ShareViewController: UIViewController {
         if records.count > 20 { records = Array(records.suffix(20)) }
 
         if let data = try? JSONEncoder().encode(records) {
-            defaults?.set(data, forKey: "analysisHistory")
+            defaults.set(data, forKey: "analysisHistory")
         }
     }
 
